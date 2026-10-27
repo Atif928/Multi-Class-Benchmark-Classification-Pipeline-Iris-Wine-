@@ -8,16 +8,18 @@ units are explicit.
 from __future__ import annotations
 
 import argparse
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LinearRegression
-from sklearn.model_selection import KFold, cross_val_score
+from sklearn.model_selection import GridSearchCV, KFold, cross_val_score
 from sklearn.pipeline import Pipeline
 
 from .data_loader import TARGET_COLUMN, load_california_housing
@@ -146,6 +148,121 @@ def fit_ols(
     )
 
 
+def tune_regularized_model(
+    prepared: PreparedData,
+    name: str,
+    *,
+    alpha_grid: Sequence[float] | None = None,
+    cv: KFold | None = None,
+    n_jobs: int = -1,
+) -> ModelResult:
+    """Tune Ridge or Lasso with ``GridSearchCV`` on training data only.
+
+    The search uses shuffled five-fold CV and negative root mean squared error.
+    Convergence warnings are captured and returned with the result so callers can
+    report them rather than silently hiding numerical issues.
+
+    Parameters
+    ----------
+    prepared:
+        Leakage-safe training/test split.
+    name:
+        ``"Ridge"`` or ``"Lasso"``.
+    alpha_grid:
+        Candidate regularization strengths. Defaults to :data:`ALPHA_GRIDS`.
+    cv:
+        Optional splitter. Defaults to :func:`make_cv_splitter`.
+    n_jobs:
+        Number of parallel jobs passed to ``GridSearchCV``.
+    """
+    if name not in ("Ridge", "Lasso"):
+        raise ValueError("name must be 'Ridge' or 'Lasso'.")
+    alphas = tuple(alpha_grid if alpha_grid is not None else ALPHA_GRIDS[name])
+    if not alphas:
+        raise ValueError("alpha_grid must contain at least one value.")
+    if any(alpha <= 0 for alpha in alphas):
+        raise ValueError("All alpha values must be strictly positive.")
+
+    splitter = cv if cv is not None else make_cv_splitter()
+    pipeline = build_model_pipeline(
+        build_estimator(name, alpha=float(alphas[0])),
+        prepared.numeric_features,
+        prepared.categorical_features,
+    )
+    search = GridSearchCV(
+        estimator=pipeline,
+        param_grid={"model__alpha": list(alphas)},
+        scoring="neg_root_mean_squared_error",
+        cv=splitter,
+        n_jobs=n_jobs,
+        refit=True,
+        return_train_score=False,
+        error_score="raise",
+    )
+
+    convergence_messages: list[str] = []
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ConvergenceWarning)
+        try:
+            search.fit(prepared.X_train, prepared.y_train)
+        except Exception as exc:
+            raise RuntimeError(f"{name} grid search failed: {exc}") from exc
+        convergence_messages.extend(
+            str(item.message)
+            for item in caught
+            if issubclass(item.category, ConvergenceWarning)
+        )
+
+    best_estimator = search.best_estimator_.named_steps["model"]
+    best_iterations = getattr(best_estimator, "n_iter_", None)
+    if (
+        name == "Lasso"
+        and best_iterations is not None
+        and int(np.max(best_iterations)) >= LASSO_MAX_ITER
+    ):
+        convergence_messages.append(
+            f"Lasso reached max_iter={LASSO_MAX_ITER}; results may be unstable."
+        )
+
+    best_alpha = float(search.best_params_["model__alpha"])
+    cv_rmse = -float(search.best_score_)
+    cv_std = float(search.cv_results_["std_test_score"][search.best_index_])
+
+    return ModelResult(
+        name=name,
+        pipeline=search.best_estimator_,
+        estimator_name=name,
+        best_alpha=best_alpha,
+        cv_rmse=cv_rmse,
+        cv_std=cv_std,
+        convergence_warnings=convergence_messages,
+    )
+
+
+def train_all_models(
+    prepared: PreparedData,
+    *,
+    alpha_grids: Mapping[str, Sequence[float]] | None = None,
+    n_jobs: int = -1,
+) -> dict[str, ModelResult]:
+    """Fit OLS, tune Ridge, and tune Lasso on the training split.
+
+    The test rows in ``prepared`` are not passed to any estimator or search.
+    """
+    grids = dict(alpha_grids or ALPHA_GRIDS)
+    results: dict[str, ModelResult] = {
+        "OLS": fit_ols(prepared, n_jobs=n_jobs),
+    }
+    for name in ("Ridge", "Lasso"):
+        results[name] = tune_regularized_model(
+            prepared,
+            name,
+            alpha_grid=grids.get(name),
+            n_jobs=n_jobs,
+        )
+    return results
+
+
 def save_models(
     results: Mapping[str, ModelResult],
     output_dir: str | Path = DEFAULT_MODELS_DIR,
@@ -233,22 +350,30 @@ def predict_house_value_dollars(
 
 
 def main() -> None:
-    """Fit the OLS baseline and print training diagnostics."""
-    parser = argparse.ArgumentParser(description="Train the OLS housing baseline.")
+    """Train all three models and print cross-validated training diagnostics."""
+    parser = argparse.ArgumentParser(
+        description="Tune OLS, Ridge, and Lasso on the training split."
+    )
     parser.add_argument("--n-jobs", type=int, default=-1)
     arguments = parser.parse_args()
 
     frame = load_california_housing()
     prepared = prepare_datasets(frame)
-    result = fit_ols(prepared, n_jobs=arguments.n_jobs)
-    train_rmse = float(
-        np.sqrt(np.mean((prepared.y_train - result.pipeline.predict(prepared.X_train)) ** 2))
-    )
+    results = train_all_models(prepared, n_jobs=arguments.n_jobs)
+
     print(f"Target: {TARGET_COLUMN} (units of $100,000)")
     print(f"Training rows: {len(prepared.X_train):,}")
     print(f"Test rows held out (not used): {len(prepared.X_test):,}")
-    print(f"OLS CV RMSE: {result.cv_rmse:.4f} ± {result.cv_std:.4f}")
-    print(f"OLS training RMSE: {train_rmse:.4f}")
+    print()
+    print(f"{'Model':<7} {'Best alpha':>11} {'CV RMSE':>10} {'CV std':>8}")
+    for name in MODEL_ORDER:
+        result = results[name]
+        print(
+            f"{result.name:<7} {result.display_alpha:>11} "
+            f"{result.cv_rmse:>10.4f} {result.cv_std:>8.4f}"
+        )
+        for message in result.convergence_warnings:
+            print(f"  warning: {message}")
 
 
 if __name__ == "__main__":
