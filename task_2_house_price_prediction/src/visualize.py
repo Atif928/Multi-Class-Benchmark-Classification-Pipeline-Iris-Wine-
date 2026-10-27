@@ -314,6 +314,78 @@ def plot_feature_boxplots(
     return figure
 
 
+def plot_vif_analysis(
+    vif_frame: pd.DataFrame,
+    *,
+    low_threshold: float = 5.0,
+    high_threshold: float = 10.0,
+) -> plt.Figure:
+    """Horizontal bar chart of variance inflation factors.
+
+    ``vif_frame`` must contain ``feature`` and ``vif`` columns, typically produced
+    by :func:`src.features.variance_inflation_factors`.
+    """
+    required = {"feature", "vif"}
+    missing = required.difference(vif_frame.columns)
+    if missing:
+        raise ValueError(f"VIF frame is missing columns: {sorted(missing)}")
+
+    data = vif_frame.sort_values("vif", ascending=True).copy()
+    finite_values = data.loc[np.isfinite(data["vif"]), "vif"]
+    finite_max = float(finite_values.max()) if not finite_values.empty else 10.0
+    data["plot_vif"] = data["vif"].replace(np.inf, finite_max * 1.35)
+    data["plot_vif"] = data["plot_vif"].clip(lower=1e-3)
+
+    colors = [
+        "#d62728" if value >= high_threshold
+        else "#ff7f0e" if value >= low_threshold
+        else "#2ca02c"
+        for value in data["vif"]
+    ]
+
+    figure, axis = plt.subplots(figsize=(10, max(5, 0.45 * len(data) + 2)))
+    bars = axis.barh(data["feature"], data["plot_vif"], color=colors, alpha=0.85)
+    axis.set_xscale("log")
+    axis.axvline(
+        low_threshold,
+        color="#555555",
+        linestyle="--",
+        linewidth=1.2,
+        label=f"Moderate threshold ({low_threshold:g})",
+    )
+    axis.axvline(
+        high_threshold,
+        color="#111111",
+        linestyle=":",
+        linewidth=1.4,
+        label=f"High threshold ({high_threshold:g})",
+    )
+    for bar, value in zip(bars, data["vif"]):
+        label = "∞" if not np.isfinite(value) else f"{value:.1f}"
+        axis.text(
+            bar.get_width() * 1.05,
+            bar.get_y() + bar.get_height() / 2,
+            label,
+            va="center",
+            fontsize=8,
+        )
+    axis.set_title("Variance Inflation Factors of Training Features")
+    axis.set_xlabel("VIF (log scale; higher = more shared linear variance)")
+    axis.set_ylabel("")
+    axis.legend(loc="lower right")
+    axis.grid(axis="y", visible=False)
+    figure.text(
+        0.5,
+        0.005,
+        "VIF is computed by regressing each feature on all other features. "
+        "High values flag multicollinearity, not necessarily poor predictive power.",
+        ha="center",
+        fontsize=9,
+        style="italic",
+    )
+    return figure
+
+
 def generate_eda_figures(
     frame: pd.DataFrame,
     output_dir: str | Path = DEFAULT_FIGURES_DIR,
