@@ -1,0 +1,37 @@
+{
+  "sample_index": 20046,
+  "split": "test",
+  "input_features": {
+    "MedInc": 1.6812,
+    "HouseAge": 25.0,
+    "AveRooms": 4.192200557103064,
+    "AveBedrms": 1.0222841225626742,
+    "Population": 1392.0,
+    "AveOccup": 3.8774373259052926,
+    "Latitude": 36.06,
+    "Longitude": -119.01
+  },
+  "actual_med_house_val": 0.477,
+  "actual_usd": 47700.0,
+  "predictions": {
+    "OLS": {
+      "predicted_med_house_val": 0.5859232349026187,
+      "predicted_usd": 58592.323490261864,
+      "absolute_error_100k": 0.10892323490261868,
+      "absolute_error_usd": 10892.323490261868
+    },
+    "Ridge": {
+      "predicted_med_house_val": 0.5861910074977656,
+      "predicted_usd": 58619.10074977657,
+      "absolute_error_100k": 0.10919100749776567,
+      "absolute_error_usd": 10919.100749776568
+    },
+    "Lasso": {
+      "predicted_med_house_val": 0.5944368490668512,
+      "predicted_usd": 59443.68490668512,
+      "absolute_error_100k": 0.11743684906685126,
+      "absolute_error_usd": 11743.684906685126
+    }
+  },
+  "unit_note": "MedHouseVal is in units of $100,000; usd fields multiply by 100,000."
+}

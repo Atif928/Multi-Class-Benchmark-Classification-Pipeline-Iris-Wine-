@@ -1,0 +1,172 @@
+{
+  "validation": {
+    "dataset": "California Housing",
+    "is_valid": true,
+    "errors": [],
+    "warnings": [],
+    "shape": {
+      "rows": 20640,
+      "columns": 9
+    },
+    "target_column": "MedHouseVal",
+    "target_unit": "$100,000",
+    "feature_columns": [
+      "MedInc",
+      "HouseAge",
+      "AveRooms",
+      "AveBedrms",
+      "Population",
+      "AveOccup",
+      "Latitude",
+      "Longitude"
+    ],
+    "column_dtypes": {
+      "MedInc": "float64",
+      "HouseAge": "float64",
+      "AveRooms": "float64",
+      "AveBedrms": "float64",
+      "Population": "float64",
+      "AveOccup": "float64",
+      "Latitude": "float64",
+      "Longitude": "float64",
+      "MedHouseVal": "float64"
+    },
+    "missing_values": {
+      "total_missing_cells": 0,
+      "columns_with_missing": {}
+    },
+    "infinite_values": {},
+    "duplicate_rows": 0,
+    "valid_target_rows": 20640,
+    "target_summary": {
+      "count": 20640,
+      "mean": 2.0685581690891475,
+      "std": 1.1539561587441385,
+      "min": 0.14999,
+      "median": 1.797,
+      "max": 5.00001
+    },
+    "categorical_feature_columns": []
+  },
+  "summary": {
+    "shape": {
+      "rows": 20640,
+      "columns": 9
+    },
+    "columns": [
+      "MedInc",
+      "HouseAge",
+      "AveRooms",
+      "AveBedrms",
+      "Population",
+      "AveOccup",
+      "Latitude",
+      "Longitude",
+      "MedHouseVal"
+    ],
+    "feature_statistics": {
+      "MedInc": {
+        "count": 20640.0,
+        "missing": 0,
+        "mean": 3.8706710029069766,
+        "std": 1.8998217179452688,
+        "min": 0.4999,
+        "q25": 2.5633999999999997,
+        "median": 3.5347999999999997,
+        "q75": 4.74325,
+        "max": 15.0001
+      },
+      "HouseAge": {
+        "count": 20640.0,
+        "missing": 0,
+        "mean": 28.639486434108527,
+        "std": 12.58555761211165,
+        "min": 1.0,
+        "q25": 18.0,
+        "median": 29.0,
+        "q75": 37.0,
+        "max": 52.0
+      },
+      "AveRooms": {
+        "count": 20640.0,
+        "missing": 0,
+        "mean": 5.428999742190376,
+        "std": 2.4741731394243187,
+        "min": 0.8461538461538461,
+        "q25": 4.440716235896959,
+        "median": 5.229128787878788,
+        "q75": 6.052380952380952,
+        "max": 141.9090909090909
+      },
+      "AveBedrms": {
+        "count": 20640.0,
+        "missing": 0,
+        "mean": 1.096675149606208,
+        "std": 0.47391085679546596,
+        "min": 0.3333333333333333,
+        "q25": 1.006079046038478,
+        "median": 1.048780487804878,
+        "q75": 1.099526066350711,
+        "max": 34.06666666666667
+      },
+      "Population": {
+        "count": 20640.0,
+        "missing": 0,
+        "mean": 1425.4767441860465,
+        "std": 1132.462121765341,
+        "min": 3.0,
+        "q25": 787.0,
+        "median": 1166.0,
+        "q75": 1725.0,
+        "max": 35682.0
+      },
+      "AveOccup": {
+        "count": 20640.0,
+        "missing": 0,
+        "mean": 3.0706551594363742,
+        "std": 10.386049562213618,
+        "min": 0.6923076923076923,
+        "q25": 2.4297411475535755,
+        "median": 2.818115654360196,
+        "q75": 3.2822609242736216,
+        "max": 1243.3333333333333
+      },
+      "Latitude": {
+        "count": 20640.0,
+        "missing": 0,
+        "mean": 35.63186143410852,
+        "std": 2.1359523974571153,
+        "min": 32.54,
+        "q25": 33.93,
+        "median": 34.26,
+        "q75": 37.71,
+        "max": 41.95
+      },
+      "Longitude": {
+        "count": 20640.0,
+        "missing": 0,
+        "mean": -119.56970445736432,
+        "std": 2.0035317235025882,
+        "min": -124.35,
+        "q25": -121.8,
+        "median": -118.49,
+        "q75": -118.01,
+        "max": -114.31
+      }
+    },
+    "target": {
+      "name": "MedHouseVal",
+      "unit": "$100,000",
+      "count": 20640,
+      "mean": 2.0685581690891475,
+      "std": 1.1539561587441385,
+      "min": 0.14999,
+      "q25": 1.196,
+      "median": 1.797,
+      "q75": 2.6472499999999997,
+      "max": 5.00001,
+      "capped_count": 965,
+      "capped_fraction": 0.04675387596899225
+    }
+  }
+}

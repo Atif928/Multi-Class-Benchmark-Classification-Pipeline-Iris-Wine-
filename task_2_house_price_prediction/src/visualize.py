@@ -386,6 +386,353 @@ def plot_vif_analysis(
     return figure
 
 
+def plot_actual_vs_predicted(
+    predictions: Mapping[str, np.ndarray],
+    y_test: pd.Series | np.ndarray,
+    *,
+    model_order: Sequence[str] = ("OLS", "Ridge", "Lasso"),
+) -> plt.Figure:
+    """Actual-versus-predicted scatterplots with a perfect-prediction line."""
+    actual = np.asarray(y_test, dtype=float).ravel()
+    names = [name for name in model_order if name in predictions]
+    if not names:
+        raise ValueError("No predictions matched the requested model names.")
+
+    lower = float(min(actual.min(), *(np.min(predictions[name]) for name in names)))
+    upper = float(max(actual.max(), *(np.max(predictions[name]) for name in names)))
+    figure, axes = plt.subplots(1, len(names), figsize=(5.6 * len(names), 5.2), squeeze=False)
+
+    for axis, name in zip(axes[0], names):
+        predicted = np.asarray(predictions[name], dtype=float).ravel()
+        axis.scatter(
+            actual,
+            predicted,
+            s=10,
+            alpha=0.30,
+            linewidths=0,
+            color=MODEL_COLORS.get(name, "#1f77b4"),
+            rasterized=True,
+        )
+        axis.plot(
+            [lower, upper],
+            [lower, upper],
+            color="black",
+            linestyle="--",
+            linewidth=1.4,
+            label="Perfect prediction (y = x)",
+        )
+        residual_sum = float(np.sum((actual - predicted) ** 2))
+        rmse = float(np.sqrt(residual_sum / len(actual)))
+        denom = float(np.sum((actual - actual.mean()) ** 2))
+        r2 = 1.0 - residual_sum / denom if denom > 0 else float("nan")
+        axis.set_title(name)
+        axis.set_xlabel("Actual median house value ($100,000)")
+        axis.set_ylabel("Predicted median house value ($100,000)")
+        axis.legend(loc="upper left")
+        axis.text(
+            0.98,
+            0.03,
+            f"RMSE = {rmse:.4f}\nR² = {r2:.4f}",
+            transform=axis.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=9,
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.85},
+        )
+
+    figure.suptitle("Actual vs Predicted Median House Values — Test Set", y=1.02)
+    return figure
+
+
+def _binned_residual_means(
+    predicted: np.ndarray,
+    residual: np.ndarray,
+    bins: int = 10,
+) -> tuple[np.ndarray, np.ndarray]:
+    frame = pd.DataFrame({"predicted": predicted, "residual": residual})
+    frame["bin"] = pd.qcut(frame["predicted"], q=bins, duplicates="drop")
+    grouped = frame.groupby("bin", observed=True).agg(
+        predicted=("predicted", "mean"),
+        residual=("residual", "mean"),
+    )
+    return grouped["predicted"].to_numpy(), grouped["residual"].to_numpy()
+
+
+def plot_residuals_vs_predicted(
+    predictions: Mapping[str, np.ndarray],
+    y_test: pd.Series | np.ndarray,
+    *,
+    model_order: Sequence[str] = ("OLS", "Ridge", "Lasso"),
+) -> plt.Figure:
+    """Residual scatterplots with a zero line and binned mean residual curve."""
+    actual = np.asarray(y_test, dtype=float).ravel()
+    names = [name for name in model_order if name in predictions]
+    if not names:
+        raise ValueError("No predictions matched the requested model names.")
+
+    figure, axes = plt.subplots(1, len(names), figsize=(5.6 * len(names), 5.2), squeeze=False)
+    for axis, name in zip(axes[0], names):
+        predicted = np.asarray(predictions[name], dtype=float).ravel()
+        residual = actual - predicted
+        axis.scatter(
+            predicted,
+            residual,
+            s=10,
+            alpha=0.30,
+            linewidths=0,
+            color=MODEL_COLORS.get(name, "#1f77b4"),
+            rasterized=True,
+        )
+        axis.axhline(0, color="black", linestyle="--", linewidth=1.3)
+        bin_centers, bin_means = _binned_residual_means(predicted, residual)
+        axis.plot(
+            bin_centers,
+            bin_means,
+            color="#d62728",
+            marker="o",
+            markersize=4,
+            linewidth=1.8,
+            label="Binned mean residual (deciles)",
+        )
+        axis.set_title(name)
+        axis.set_xlabel("Predicted median house value ($100,000)")
+        axis.set_ylabel("Residual: actual − predicted ($100,000)")
+        axis.legend(loc="upper right")
+
+    figure.suptitle("Residuals vs Predicted Values — Test Set", y=1.02)
+    figure.text(
+        0.5,
+        0.01,
+        "A flat zero-centred cloud is ideal. Curves or fan shapes indicate "
+        "non-linearity or changing error variance.",
+        ha="center",
+        fontsize=9,
+        style="italic",
+    )
+    return figure
+
+
+def plot_residual_distributions(
+    residuals: Mapping[str, np.ndarray],
+    *,
+    model_order: Sequence[str] = ("OLS", "Ridge", "Lasso"),
+) -> plt.Figure:
+    """Histograms with KDE curves for test-set residuals."""
+    names = [name for name in model_order if name in residuals]
+    if not names:
+        raise ValueError("No residuals matched the requested model names.")
+
+    figure, axes = plt.subplots(1, len(names), figsize=(5.6 * len(names), 4.8), squeeze=False)
+    for axis, name in zip(axes[0], names):
+        values = np.asarray(residuals[name], dtype=float).ravel()
+        sns.histplot(
+            values,
+            bins=50,
+            kde=True,
+            color=MODEL_COLORS.get(name, "#1f77b4"),
+            edgecolor="white",
+            ax=axis,
+        )
+        axis.axvline(0, color="black", linestyle="--", linewidth=1.3)
+        axis.axvline(
+            float(values.mean()),
+            color="#d62728",
+            linestyle=":",
+            linewidth=1.4,
+            label=f"Mean = {values.mean():.4f}",
+        )
+        axis.set_title(name)
+        axis.set_xlabel("Residual: actual − predicted ($100,000)")
+        axis.set_ylabel("Frequency")
+        axis.legend(loc="upper right")
+        axis.text(
+            0.02,
+            0.96,
+            f"Std = {values.std(ddof=1):.4f}\n"
+            f"Median = {np.median(values):.4f}\n"
+            f"Skew = {pd.Series(values).skew():.4f}",
+            transform=axis.transAxes,
+            va="top",
+            fontsize=8.5,
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.85},
+        )
+
+    figure.suptitle("Residual Distributions — Test Set", y=1.02)
+    return figure
+
+
+def plot_metric_comparison(metrics: pd.DataFrame) -> plt.Figure:
+    """Grouped bar chart comparing RMSE, MAE, and R² across models."""
+    required = {"Model", "Test RMSE", "Test MAE", "Test R²"}
+    missing = required.difference(metrics.columns)
+    if missing:
+        raise ValueError(f"Metrics frame is missing columns: {sorted(missing)}")
+
+    metric_columns = ["Test RMSE", "Test MAE", "Test R²"]
+    metric_labels = ["RMSE", "MAE", "R²"]
+    plot_data = metrics.set_index("Model")[metric_columns]
+    positions = np.arange(len(plot_data))
+    width = 0.25
+    colors = ["#2a6f97", "#61a5c2", "#a9d6e5"]
+
+    figure, axis = plt.subplots(figsize=(10, 5.8))
+    for index, (column, label, color) in enumerate(
+        zip(metric_columns, metric_labels, colors)
+    ):
+        offsets = (index - 1) * width
+        bars = axis.bar(
+            positions + offsets,
+            plot_data[column],
+            width,
+            label=label,
+            color=color,
+            edgecolor="black",
+            linewidth=0.4,
+        )
+        for bar in bars:
+            height = bar.get_height()
+            axis.text(
+                bar.get_x() + bar.get_width() / 2,
+                height + 0.008,
+                f"{height:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+
+    axis.set_xticks(positions)
+    axis.set_xticklabels(plot_data.index)
+    axis.set_ylabel("Metric value (RMSE/MAE in $100,000; R² unitless)")
+    axis.set_title("Test-Set Performance Comparison")
+    axis.legend(title="Metric", loc="upper right")
+    axis.set_ylim(bottom=0)
+    figure.text(
+        0.5,
+        0.01,
+        "Lower RMSE/MAE is better; higher R² is better.",
+        ha="center",
+        fontsize=9,
+        style="italic",
+    )
+    return figure
+
+
+def plot_coefficient_comparison(
+    coefficients: pd.DataFrame,
+    *,
+    top_n: int = 12,
+    model_order: Sequence[str] = ("OLS", "Ridge", "Lasso"),
+) -> plt.Figure:
+    """Compare standardized coefficients, highlighting Lasso sparsity.
+
+    Numeric inputs are standardized by the preprocessing pipeline, so coefficients
+    are on a per-standard-deviation scale. Engineered ratios and raw features share
+    components, and encoded categorical coefficients are relative to a reference
+    level; these are associations, not causal effects.
+    """
+    required = {"Model", "Feature", "Coefficient"}
+    missing = required.difference(coefficients.columns)
+    if missing:
+        raise ValueError(f"Coefficient frame is missing columns: {sorted(missing)}")
+
+    names = [name for name in model_order if name in set(coefficients["Model"])]
+    if not names:
+        raise ValueError("No recognized models were found in the coefficient frame.")
+
+    regularized = coefficients[coefficients["Model"].isin(["Ridge", "Lasso"])]
+    ranking_source = regularized if not regularized.empty else coefficients
+    importance = (
+        ranking_source.assign(Abs=ranking_source["Coefficient"].abs())
+        .groupby("Feature", as_index=False)["Abs"]
+        .max()
+        .sort_values("Abs", ascending=False)
+    )
+    selected = importance.head(top_n)["Feature"].tolist()
+
+    figure, axes = plt.subplots(1, len(names), figsize=(5.6 * len(names), 6.2), squeeze=False)
+    for axis, name in zip(axes[0], names):
+        subset = (
+            coefficients[coefficients["Model"] == name]
+            .set_index("Feature")
+            .reindex(selected)
+        )
+        values = subset["Coefficient"].fillna(0.0).to_numpy(dtype=float)
+        axis.barh(
+            np.arange(len(selected)),
+            values,
+            color=MODEL_COLORS.get(name, "#1f77b4"),
+            alpha=0.85,
+        )
+        axis.axvline(0, color="black", linewidth=1)
+        axis.set_yticks(np.arange(len(selected)))
+        axis.set_yticklabels(selected)
+        axis.invert_yaxis()
+        axis.set_title(name)
+        axis.set_xlabel("Standardized coefficient (target units per 1 SD)")
+        axis.grid(axis="y", visible=False)
+        zero_count = int(np.isclose(values, 0.0, atol=1e-12).sum())
+        axis.text(
+            0.98,
+            0.02,
+            f"Zero coefficients shown: {zero_count}",
+            transform=axis.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=8,
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.85},
+        )
+
+    figure.suptitle("Coefficient Comparison — Top Features by Regularized Importance", y=1.01)
+    figure.text(
+        0.5,
+        0.01,
+        "Numeric predictors are standardized. Correlated and engineered features "
+        "share information, so coefficients are not causal effects.",
+        ha="center",
+        fontsize=9,
+        style="italic",
+    )
+    return figure
+
+
+def generate_diagnostic_figures(
+    evaluation: object,
+    output_dir: str | Path = DEFAULT_FIGURES_DIR,
+) -> dict[str, Path]:
+    """Generate and save test-set diagnostic and coefficient figures.
+
+    ``evaluation`` is expected to expose ``predictions``, ``residuals``,
+    ``metrics``, and ``coefficients`` attributes, normally an
+    :class:`src.evaluate.EvaluationResults`.
+    """
+    set_plot_style()
+    directory = Path(output_dir)
+    # The bundle stores predictions and residuals, so recover actual values from
+    # their identity (actual = predicted + residual) without retaining y_test.
+    first_name = next(iter(evaluation.predictions))
+    actual = evaluation.predictions[first_name] + evaluation.residuals[first_name]
+    figures = {
+        "actual_vs_predicted": plot_actual_vs_predicted(evaluation.predictions, actual),
+        "residuals_vs_predicted": plot_residuals_vs_predicted(
+            evaluation.predictions, actual
+        ),
+        "residual_distributions": plot_residual_distributions(evaluation.residuals),
+        "metric_comparison": plot_metric_comparison(evaluation.metrics),
+        "coefficient_comparison": plot_coefficient_comparison(evaluation.coefficients),
+    }
+    filenames = {
+        "actual_vs_predicted": "08_actual_vs_predicted.png",
+        "residuals_vs_predicted": "09_residuals_vs_predicted.png",
+        "residual_distributions": "10_residual_distributions.png",
+        "metric_comparison": "11_metric_comparison.png",
+        "coefficient_comparison": "12_coefficient_comparison.png",
+    }
+    paths: dict[str, Path] = {}
+    for key, figure in figures.items():
+        paths[key] = save_figure(figure, directory / filenames[key])
+    return paths
+
+
 def generate_eda_figures(
     frame: pd.DataFrame,
     output_dir: str | Path = DEFAULT_FIGURES_DIR,

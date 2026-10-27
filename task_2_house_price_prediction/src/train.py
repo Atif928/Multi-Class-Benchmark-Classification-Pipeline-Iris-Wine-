@@ -11,7 +11,7 @@ import argparse
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import joblib
 import numpy as np
@@ -22,8 +22,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import GridSearchCV, KFold, cross_val_score
 from sklearn.pipeline import Pipeline
 
-from .data_loader import TARGET_COLUMN, load_california_housing
-from .features import REQUIRED_RAW_FEATURES, add_engineered_features
+from .data_loader import FEATURE_COLUMNS, TARGET_COLUMN, load_california_housing
+from .features import add_engineered_features
 from .preprocessing import (
     CV_FOLDS,
     RANDOM_STATE,
@@ -327,7 +327,7 @@ def predict_house_value(
     else:
         raise TypeError("features must be a mapping or a one-row pandas DataFrame.")
 
-    missing = [column for column in REQUIRED_RAW_FEATURES if column not in frame.columns]
+    missing = [column for column in FEATURE_COLUMNS if column not in frame.columns]
     if missing:
         raise ValueError(f"Missing required raw features: {missing}")
 
@@ -349,31 +349,246 @@ def predict_house_value_dollars(
     return predict_house_value(model, features) * 100_000.0
 
 
+def _json_default(value: object) -> object:
+    """Convert NumPy and Path values for JSON serialization."""
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable.")
+
+
+def run_pipeline(
+    *,
+    project_root: str | Path | None = None,
+    cache_path: str | Path | None = None,
+    n_jobs: int = -1,
+) -> dict[str, Any]:
+    """Run the full reproducible workflow and write all deliverables.
+
+    Steps: load/validate → EDA figures → split → feature engineering → VIF →
+    train/tune → test evaluation → residual/coefficient figures → reports →
+    model artifacts → sample prediction → run metadata.
+    """
+    import json
+    import platform
+    import sys
+    from datetime import datetime, timezone
+
+    import joblib
+    import matplotlib
+    import seaborn
+    import sklearn
+
+    from .data_loader import summarize_dataset, summary_to_markdown, validate_dataset
+    from .evaluate import evaluate_results, write_evaluation_reports
+    from .features import variance_inflation_factors
+    from .visualize import (
+        generate_diagnostic_figures,
+        generate_eda_figures,
+        plot_vif_analysis,
+        save_figure,
+        set_plot_style,
+    )
+
+    root = (
+        Path(project_root).resolve()
+        if project_root is not None
+        else Path(__file__).resolve().parent.parent
+    )
+    figure_dir = root / "outputs" / "figures"
+    report_dir = root / "outputs" / "reports"
+    model_dir = root / "models"
+    figure_dir.mkdir(parents=True, exist_ok=True)
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    frame = load_california_housing(cache_path=cache_path)
+    validation = validate_dataset(frame)
+    summary = summarize_dataset(frame)
+
+    (report_dir / "dataset_summary.json").write_text(
+        json.dumps(
+            {"validation": validation, "summary": summary},
+            indent=2,
+            default=_json_default,
+        ),
+        encoding="utf-8",
+    )
+    (report_dir / "dataset_summary.md").write_text(
+        summary_to_markdown(validation, summary), encoding="utf-8"
+    )
+
+    figure_paths = generate_eda_figures(frame, figure_dir)
+
+    prepared = prepare_datasets(frame)
+    vif_frame = variance_inflation_factors(prepared.X_train)
+    vif_path = report_dir / "vif_analysis.csv"
+    vif_frame.to_csv(vif_path, index=False)
+    set_plot_style()
+    figure_paths["vif_analysis"] = save_figure(
+        plot_vif_analysis(vif_frame), figure_dir / "07_vif_analysis.png"
+    )
+
+    results = train_all_models(prepared, n_jobs=n_jobs)
+    evaluation = evaluate_results(results, prepared.X_test, prepared.y_test)
+    report_paths = write_evaluation_reports(evaluation, report_dir)
+    report_paths["vif_csv"] = vif_path
+    report_paths["dataset_summary_json"] = report_dir / "dataset_summary.json"
+    report_paths["dataset_summary_md"] = report_dir / "dataset_summary.md"
+
+    figure_paths.update(generate_diagnostic_figures(evaluation, figure_dir))
+    model_paths = save_models(results, model_dir)
+
+    sample_row = prepared.X_test.iloc[0]
+    sample_features = {
+        column: float(sample_row[column]) for column in FEATURE_COLUMNS
+    }
+    sample_actual = float(prepared.y_test.iloc[0])
+    sample_predictions: dict[str, Any] = {}
+    for name, result in results.items():
+        predicted = predict_house_value(result.pipeline, sample_features)
+        sample_predictions[name] = {
+            "predicted_med_house_val": predicted,
+            "predicted_usd": predicted * 100_000.0,
+            "absolute_error_100k": abs(sample_actual - predicted),
+            "absolute_error_usd": abs(sample_actual - predicted) * 100_000.0,
+        }
+    sample_path = report_dir / "sample_prediction.json"
+    sample_path.write_text(
+        json.dumps(
+            {
+                "sample_index": int(prepared.X_test.index[0]),
+                "split": "test",
+                "input_features": sample_features,
+                "actual_med_house_val": sample_actual,
+                "actual_usd": sample_actual * 100_000.0,
+                "predictions": sample_predictions,
+                "unit_note": "MedHouseVal is in units of $100,000; usd fields multiply by 100,000.",
+            },
+            indent=2,
+            default=_json_default,
+        ),
+        encoding="utf-8",
+    )
+    report_paths["sample_prediction"] = sample_path
+
+    best_cv_model = min(results.values(), key=lambda result: result.cv_rmse)
+    metadata = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "dataset": "California Housing (sklearn.datasets.fetch_california_housing)",
+        "target": TARGET_COLUMN,
+        "target_unit": "$100,000",
+        "shape": {"rows": int(frame.shape[0]), "columns": int(frame.shape[1])},
+        "random_state": RANDOM_STATE,
+        "test_size": 0.2,
+        "cv_folds": CV_FOLDS,
+        "cv_shuffle": True,
+        "scoring": "neg_root_mean_squared_error",
+        "alpha_grids": {name: list(values) for name, values in ALPHA_GRIDS.items()},
+        "selected_alphas": {
+            name: result.best_alpha for name, result in results.items()
+        },
+        "cv_rmse": {name: result.cv_rmse for name, result in results.items()},
+        "convergence_warnings": {
+            name: result.convergence_warnings
+            for name, result in results.items()
+            if result.convergence_warnings
+        },
+        "best_cv_model": best_cv_model.name,
+        "lasso_max_iter": LASSO_MAX_ITER,
+        "train_rows": int(len(prepared.X_train)),
+        "test_rows": int(len(prepared.X_test)),
+        "feature_columns": list(prepared.all_features),
+        "engineered_features": [
+            column
+            for column in prepared.X_train.columns
+            if column not in frame.columns
+        ],
+        "versions": {
+            "python": sys.version.split()[0],
+            "platform": platform.platform(),
+            "pandas": pd.__version__,
+            "numpy": np.__version__,
+            "scikit-learn": sklearn.__version__,
+            "matplotlib": matplotlib.__version__,
+            "seaborn": seaborn.__version__,
+            "joblib": joblib.__version__,
+        },
+        "model_artifacts": {
+            name: path.resolve().relative_to(root).as_posix()
+            for name, path in model_paths.items()
+        },
+    }
+    metadata_path = report_dir / "run_metadata.json"
+    metadata_path.write_text(
+        json.dumps(metadata, indent=2, default=_json_default), encoding="utf-8"
+    )
+    report_paths["run_metadata"] = metadata_path
+
+    return {
+        "frame": frame,
+        "validation": validation,
+        "summary": summary,
+        "prepared": prepared,
+        "results": results,
+        "evaluation": evaluation,
+        "figure_paths": figure_paths,
+        "report_paths": report_paths,
+        "model_paths": model_paths,
+    }
+
+
 def main() -> None:
-    """Train all three models and print cross-validated training diagnostics."""
+    """Run the full training and evaluation pipeline from the command line."""
     parser = argparse.ArgumentParser(
-        description="Tune OLS, Ridge, and Lasso on the training split."
+        description="Train, tune, evaluate, and report the California housing models."
     )
     parser.add_argument("--n-jobs", type=int, default=-1)
+    parser.add_argument(
+        "--cache-path",
+        type=Path,
+        default=None,
+        help="Optional CSV cache for the dataset (read if present, written if downloaded).",
+    )
+    parser.add_argument(
+        "--project-root",
+        type=Path,
+        default=None,
+        help="Project root for outputs; defaults to the task_2 directory.",
+    )
     arguments = parser.parse_args()
 
-    frame = load_california_housing()
-    prepared = prepare_datasets(frame)
-    results = train_all_models(prepared, n_jobs=arguments.n_jobs)
+    artifacts = run_pipeline(
+        project_root=arguments.project_root,
+        cache_path=arguments.cache_path,
+        n_jobs=arguments.n_jobs,
+    )
+    prepared = artifacts["prepared"]
+    results = artifacts["results"]
+    evaluation = artifacts["evaluation"]
 
     print(f"Target: {TARGET_COLUMN} (units of $100,000)")
     print(f"Training rows: {len(prepared.X_train):,}")
-    print(f"Test rows held out (not used): {len(prepared.X_test):,}")
+    print(f"Test rows: {len(prepared.X_test):,}")
     print()
-    print(f"{'Model':<7} {'Best alpha':>11} {'CV RMSE':>10} {'CV std':>8}")
+    print(evaluation.metrics_markdown())
+    print()
     for name in MODEL_ORDER:
         result = results[name]
         print(
-            f"{result.name:<7} {result.display_alpha:>11} "
-            f"{result.cv_rmse:>10.4f} {result.cv_std:>8.4f}"
+            f"{name}: selected alpha={result.display_alpha}, "
+            f"CV RMSE={result.cv_rmse:.4f} ± {result.cv_std:.4f}"
         )
         for message in result.convergence_warnings:
             print(f"  warning: {message}")
+    print()
+    print(f"Figures written to: {artifacts['figure_paths']['target_distribution'].parent}")
+    print(f"Reports written to: {artifacts['report_paths']['metrics_csv'].parent}")
+    print(f"Models written to: {next(iter(artifacts['model_paths'].values())).parent}")
 
 
 if __name__ == "__main__":

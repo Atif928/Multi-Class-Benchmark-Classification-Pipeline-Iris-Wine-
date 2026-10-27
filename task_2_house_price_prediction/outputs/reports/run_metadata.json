@@ -1,0 +1,81 @@
+{
+  "generated_at_utc": "2026-10-27T02:21:57.867509+00:00",
+  "dataset": "California Housing (sklearn.datasets.fetch_california_housing)",
+  "target": "MedHouseVal",
+  "target_unit": "$100,000",
+  "shape": {
+    "rows": 20640,
+    "columns": 9
+  },
+  "random_state": 42,
+  "test_size": 0.2,
+  "cv_folds": 5,
+  "cv_shuffle": true,
+  "scoring": "neg_root_mean_squared_error",
+  "alpha_grids": {
+    "Ridge": [
+      0.01,
+      0.1,
+      1.0,
+      10.0,
+      100.0
+    ],
+    "Lasso": [
+      0.001,
+      0.01,
+      0.1,
+      1.0,
+      10.0
+    ]
+  },
+  "selected_alphas": {
+    "OLS": null,
+    "Ridge": 1.0,
+    "Lasso": 0.001
+  },
+  "cv_rmse": {
+    "OLS": 0.6549836853040107,
+    "Ridge": 0.6549821349338881,
+    "Lasso": 0.6547983923705522
+  },
+  "convergence_warnings": {},
+  "best_cv_model": "Lasso",
+  "lasso_max_iter": 100000,
+  "train_rows": 16512,
+  "test_rows": 4128,
+  "feature_columns": [
+    "MedInc",
+    "HouseAge",
+    "AveRooms",
+    "AveBedrms",
+    "Population",
+    "AveOccup",
+    "Latitude",
+    "Longitude",
+    "RoomsPerPerson",
+    "BedroomRatio",
+    "IncomePerPerson",
+    "LogPopulation"
+  ],
+  "engineered_features": [
+    "RoomsPerPerson",
+    "BedroomRatio",
+    "IncomePerPerson",
+    "LogPopulation"
+  ],
+  "versions": {
+    "python": "3.13.17",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "pandas": "3.1.0",
+    "numpy": "2.5.4",
+    "scikit-learn": "1.9.1",
+    "matplotlib": "3.11.2",
+    "seaborn": "0.13.2",
+    "joblib": "1.6.0"
+  },
+  "model_artifacts": {
+    "OLS": "models/ols_pipeline.joblib",
+    "Ridge": "models/ridge_pipeline.joblib",
+    "Lasso": "models/lasso_pipeline.joblib"
+  }
+}
