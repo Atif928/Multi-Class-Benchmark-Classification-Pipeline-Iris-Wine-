@@ -1,0 +1,39 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment files and secrets
+.env
+.env.*
+*.pem
+
+# Jupyter
+.ipynb_checkpoints/
+*.nbconvert.ipynb
+
+# Downloaded data: keep only the placeholder
+data/*
+!data/.gitkeep
+
+# Binary model artifacts: keep only the placeholder
+models/*
+!models/.gitkeep
+
+# Transient output files
+outputs/reports/*.log
+outputs/reports/tmp/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
