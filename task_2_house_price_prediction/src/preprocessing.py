@@ -15,7 +15,6 @@ import numpy as np
 import pandas as pd
 from pandas.api.types import (
     is_bool_dtype,
-    is_categorical_dtype,
     is_numeric_dtype,
     is_object_dtype,
     is_string_dtype,
@@ -130,13 +129,16 @@ def infer_feature_types(
 
     for column in frame.columns:
         series = frame[column]
-        if is_numeric_dtype(series):
+        # Boolean columns are numeric in pandas, but for modelling they are
+        # categorical indicators and should be one-hot encoded.
+        if is_bool_dtype(series):
+            categorical_features.append(str(column))
+        elif is_numeric_dtype(series):
             numeric_features.append(str(column))
         elif (
             is_object_dtype(series)
             or is_string_dtype(series)
-            or is_bool_dtype(series)
-            or is_categorical_dtype(series)
+            or isinstance(series.dtype, pd.CategoricalDtype)
         ):
             categorical_features.append(str(column))
         else:
